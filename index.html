@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Clean Uploader - Patch Video Lokal</title>
+    <style>
+        body {
+            font-family: system-ui;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .dropzone {
+            border: 3px dashed #ccc;
+            border-radius: 16px;
+            padding: 60px;
+            text-align: center;
+            background: white;
+            cursor: pointer;
+        }
+        .dropzone.drag-over {
+            border-color: #10b981;
+            background: #f0fdf4;
+        }
+        button {
+            background: #10b981;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 8px;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 Clean Uploader</h1>
+    <p>Patch video lokal untuk upload ke TikTok Studio (MOV/MP4 support)</p>
+    
+    <div class="dropzone" id="dropzone">
+        📁 Drag & drop video di sini<br>
+        atau klik untuk pilih file
+    </div>
+    <input type="file" id="fileInput" accept=".mp4,.mov" style="display:none">
+    
+    <div style="margin-top: 20px; text-align: center;">
+        <button id="patchBtn" disabled>🔧 Patch Video</button>
+    </div>
+    
+    <div id="status"></div>
+
+    <script>
+        const PAYLOAD = 268435457;
+        let selectedFile = null;
+        
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const patchBtn = document.getElementById('patchBtn');
+        const statusEl = document.getElementById('status');
+        
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('drag-over');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('drag-over');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && (file.name.endsWith('.mp4') || file.name.endsWith('.mov'))) {
+                selectedFile = file;
+                statusEl.innerHTML = `✅ File: ${file.name} (${(file.size/1024/1024).toFixed(2)} MB)`;
+                patchBtn.disabled = false;
+            } else {
+                statusEl.innerHTML = '❌ Harap pilih file .mp4 atau .mov';
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                selectedFile = e.target.files[0];
+                statusEl.innerHTML = `✅ File: ${selectedFile.name} (${(selectedFile.size/1024/1024).toFixed(2)} MB)`;
+                patchBtn.disabled = false;
+            }
+        });
+        
+        async function patchVideo(file) {
+            const buffer = await file.arrayBuffer();
+            const data = new Uint8Array(buffer);
+            
+            // Cari atom elst
+            const elstMagic = [0x65, 0x6C, 0x73, 0x74];
+            let elstIndex = -1;
+            for (let i = 0; i < data.length - 4; i++) {
+                if (data[i] === elstMagic[0] && data[i+1] === elstMagic[1] &&
+                    data[i+2] === elstMagic[2] && data[i+3] === elstMagic[3]) {
+                    elstIndex = i;
+                    break;
+                }
+            }
+            
+            if (elstIndex === -1) {
+                throw new Error('Atom "elst" tidak ditemukan');
+            }
+            
+            // Tulis payload
+            const offset = elstIndex + 8;
+            data[offset] = (PAYLOAD >> 24) & 0xFF;
+            data[offset+1] = (PAYLOAD >> 16) & 0xFF;
+            data[offset+2] = (PAYLOAD >> 8) & 0xFF;
+            data[offset+3] = PAYLOAD & 0xFF;
+            
+            return data.buffer;
+        }
+        
+        patchBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            patchBtn.disabled = true;
+            statusEl.innerHTML = '🔍 Mencari atom elst & patch...';
+            
+            try {
+                const patchedBuffer = await patchVideo(selectedFile);
+                const blob = new Blob([patchedBuffer], { type: selectedFile.type || 'video/mp4' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const originalName = selectedFile.name.replace(/\.[^/.]+$/, '');
+                const ext = selectedFile.name.split('.').pop();
+                a.download = `${originalName}_clean.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                statusEl.innerHTML = '✅ Selesai! Video sudah di-patch dan di-download. Upload ke TikTok Studio.';
+            } catch (err) {
+                statusEl.innerHTML = '❌ ' + err.message;
+            } finally {
+                patchBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
